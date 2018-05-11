@@ -15,12 +15,13 @@ from tensorboardX import SummaryWriter
 import progressbar
 import config
 import data
-from model.san import *
+from models.san import *
+from model import *
 import utils
 
 args={}
 parser = argparse.ArgumentParser()
-parser.add_argument('--weight_decay', type=float, default=5e-4,
+parser.add_argument('--weight_decay', type=float, default=0,
                     help='weight decay')
 parser.add_argument('--schedule', type=int, nargs='+', default=[20, 30, 40],
                      help='Decrease learning rate at these epochs.')
@@ -28,7 +29,7 @@ parser.add_argument('--checkpoint', type=str, default='checkpoint')
 parser.add_argument('--model', type=str, default='resnet')
 parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--num-epochs', type=int, default=50)
-parser.add_argument('--learning-rate', type=float, default=0.1)
+parser.add_argument('--learning-rate', type=float, default=0.001)
 parser.add_argument('--test-only', dest='test_only', action='store_true')
 args = parser.parse_args()
 def main():
