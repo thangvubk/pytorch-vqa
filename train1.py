@@ -15,7 +15,7 @@ from tensorboardX import SummaryWriter
 import progressbar
 import config
 import data
-from model import *
+from model.san import *
 import utils
 
 args={}
@@ -44,7 +44,7 @@ def main():
         os.makedirs(checkpoint)
     model_path = os.path.join(checkpoint, 'best_model.pt')
     print('Loading model...')
-    model = Net(train_loader.dataset.num_tokens)
+    model = SAN(train_loader.dataset.num_tokens)
     #model = resnet50_CA()
     #print(model)
     # Test only
