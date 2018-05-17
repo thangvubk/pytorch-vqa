@@ -1,21 +1,28 @@
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-
+import torch.nn.init as init 
+from torch.nn.utils.rnn import pack_padded_sequence
 class SAN(nn.Module):
     def __init__(self, vocab_size):
         super(SAN, self).__init__()
         self.image_module = ImageEmbedding()
         self.question_module = QuestionEmbedding(vocab_size)
         self.attention_module = Attention()
+        self.question_module1 = TextProcessor(
+            embedding_tokens=vocab_size,
+            embedding_features=300,
+            lstm_features=1024,
+            drop=0.5,
+        )
     
     def forward(self, image, ques, ques_len):
         embed_image = self.image_module(image)
-        embed_quest = self.question_module(ques, ques_len)
+        embed_quest = self.question_module(ques, ques_len)#list(ques_len.data))
         return self.attention_module(embed_quest, embed_image)
 
 class Attention(nn.Module): # Extend PyTorch's Module class
-    def __init__(self, input_size=1024, att_size=512, img_seq_size=196, output_size=3000, drop_ratio=0.5):
+    def __init__(self, input_size=1024, att_size=512, img_seq_size=196, output_size=1000, drop_ratio=0.5):
         super(Attention, self).__init__() # Must call super __init__()
         self.input_size = input_size
         self.att_size = att_size
@@ -48,9 +55,9 @@ class Attention(nn.Module): # Extend PyTorch's Module class
 
         h1 = self.tan(ques_emb_1.view(B, 1, self.att_size) + img_emb_1)
 
-        #h1_emb = self.fc13(self.dp(h1))
+        h1_emb = self.fc13(self.dp(h1))
         #h1_emb = self.dp(self.fc13(h1))
-        h1_emb = self.fc13(h1)
+        #h1_emb = self.fc13(h1)
         p1 = self.sf(h1_emb.view(-1, self.img_seq_size)).view(B, 1, self.img_seq_size)
 
         # Weighted sum
@@ -63,9 +70,9 @@ class Attention(nn.Module): # Extend PyTorch's Module class
 
         h2 = self.tan(ques_emb_2.view(B, 1, self.att_size) + img_emb_2)
 
-        #h2_emb = self.fc23(self.dp(h2))
+        h2_emb = self.fc23(self.dp(h2))
         #h2_emb = self.dp(self.fc23(h2))
-        h2_emb = self.fc23(h2)
+        #h2_emb = self.fc23(h2)
         p2 = self.sf(h2_emb.view(-1, self.img_seq_size)).view(B, 1, self.img_seq_size)
 
         # Weighted sum
@@ -78,7 +85,7 @@ class Attention(nn.Module): # Extend PyTorch's Module class
         return score
 
 class ImageEmbedding(nn.Module):
-    def __init__(self, hidden_size=1024, feature_type='Residual'):
+    def __init__(self, hidden_size=1024, feature_type='VGG'):
         super(ImageEmbedding, self).__init__() # Must call super __init__()
 
         if feature_type == 'VGG':
@@ -152,3 +159,33 @@ class QuestionEmbedding(nn.Module):
 
         # output: [B, hidden_size]
         return torch.bmm(h, mask).view(B, -1)
+
+class TextProcessor(nn.Module):
+    def __init__(self, embedding_tokens, embedding_features, lstm_features, drop=0.0):
+        super(TextProcessor, self).__init__()
+        self.embedding = nn.Embedding(embedding_tokens, embedding_features, padding_idx=0)
+        self.drop = nn.Dropout(drop)
+        self.tanh = nn.Tanh()
+        self.lstm = nn.LSTM(input_size=embedding_features,
+                            hidden_size=lstm_features,
+                            num_layers=1)
+        self.features = lstm_features
+
+        self._init_lstm(self.lstm.weight_ih_l0)
+        self._init_lstm(self.lstm.weight_hh_l0)
+        self.lstm.bias_ih_l0.data.zero_()
+        self.lstm.bias_hh_l0.data.zero_()
+
+        init.xavier_uniform(self.embedding.weight)
+
+    def _init_lstm(self, weight):
+        for w in weight.chunk(4, 0):
+            init.xavier_uniform(w)
+
+    def forward(self, q, q_len):
+        embedded = self.embedding(q)
+        tanhed = self.tanh(self.drop(embedded))
+        packed = pack_padded_sequence(tanhed, q_len, batch_first=True)
+        _, (_, c) = self.lstm(packed)
+        return c.squeeze(0)
+

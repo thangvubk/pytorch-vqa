@@ -7,14 +7,14 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import config
 
 
-class Net(nn.Module):
+class Proposed(nn.Module):
     """ Re-implementation of ``Show, Ask, Attend, and Answer: A Strong Baseline For Visual Question Answering'' [0]
 
     [0]: https://arxiv.org/abs/1704.03162
     """
 
     def __init__(self, embedding_tokens):
-        super(Net, self).__init__()
+        super(Proposed, self).__init__()
         question_features = 1024
         vision_features = config.output_features
         glimpses = 2
@@ -25,19 +25,27 @@ class Net(nn.Module):
             lstm_features=question_features,
             drop=0.5,
         )
-        self.attention = Attention(
+        self.fusion = Fusion(
             v_features=vision_features,
             q_features=question_features,
             mid_features=512,
-            glimpses=2,
+            drop=0.5,
+        )
+
+        self.fusion1 = Fusion(
+            v_features=vision_features,
+            q_features=512,
+            mid_features=512,
             drop=0.5,
         )
         self.classifier = Classifier(
-            in_features=glimpses * vision_features + question_features,
+            in_features=512 + 1024,  # equals fusion mid feature*2
             mid_features=1024,
             out_features=config.max_answers,
             drop=0.5,
         )
+
+        self.c_att = Channel_Attention_Layer(512)
 
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
@@ -49,13 +57,18 @@ class Net(nn.Module):
         q = self.text(q, list(q_len.data))
 
         v = v / (v.norm(p=2, dim=1, keepdim=True).expand_as(v) + 1e-8)
-        a = self.attention(v, q)
-        v = apply_attention(v, a)
+        #i#iprint(v.size(), q.size())
+        f = self.fusion(v, q)
+        f1 = self.fusion1(v, f)
+        #att=self.c_att(f)
+        #q = q*att
 
-        combined = torch.cat([v, q], dim=1)
+        #v = apply_attention(v, a)
+        #print(f.size(), q.size())
+
+        combined = torch.cat([f, q], dim=1)
         answer = self.classifier(combined)
         return answer
-
 
 class Classifier(nn.Sequential):
     def __init__(self, in_features, mid_features, out_features, drop=0.0):
@@ -65,7 +78,6 @@ class Classifier(nn.Sequential):
         self.add_module('relu', nn.ReLU())
         self.add_module('drop2', nn.Dropout(drop))
         self.add_module('lin2', nn.Linear(mid_features, out_features))
-
 
 class TextProcessor(nn.Module):
     def __init__(self, embedding_tokens, embedding_features, lstm_features, drop=0.0):
@@ -96,23 +108,75 @@ class TextProcessor(nn.Module):
         _, (_, c) = self.lstm(packed)
         return c.squeeze(0)
 
+class Channel_Attention_Layer(nn.Module):
+    def __init__(self, channel, reduction=16):
+        super(Channel_Attention_Layer, self).__init__()
+        #self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+                nn.Linear(channel, channel // reduction),
+                nn.ReLU(inplace=True),
+                nn.Linear(channel // reduction, channel*2),
+                nn.Sigmoid()
+        )
 
-class Attention(nn.Module):
-    def __init__(self, v_features, q_features, mid_features, glimpses, drop=0.0):
-        super(Attention, self).__init__()
-        self.v_conv = nn.Conv2d(v_features, mid_features, 1, bias=False)  # let self.lin take care of bias
+    def forward(self, x):
+        #b, c, _, _ = x.size()
+        #x = self.avg_pool(x).view(b, c)
+        #x = self.fc(x).view(b, c, 1, 1)
+        #y = self.fc(x)
+        return self.fc(x)
+
+class Spatial_Attention_Layer(nn.Module):
+    def __init__(self, channel):
+        super(Spatial_Attention_Layer, self).__init__()
+        self.conv1 = nn.Conv2d(channel, 1, 1)
+
+    def forward(self, x):
+        b, _, h, w = x.size()
+        x = self.conv1(x)
+        x = x.view(x.size(0), -1)
+        x = F.softmax(x)
+        x = x.view(b, 1, h, w)
+        return x
+
+class Fusion(nn.Module):
+    def __init__(self, v_features, q_features, mid_features, drop=0.0):
+        super(Fusion, self).__init__()
+        self.v_conv = nn.Conv2d(v_features, mid_features, 1, padding=0)  # let self.lin take care of bias
         self.q_lin = nn.Linear(q_features, mid_features)
-        self.x_conv = nn.Conv2d(mid_features, glimpses, 1)
+        self.fusion = nn.Sequential(
+            nn.Conv2d(mid_features, 512, 1, padding=0),
+            #nn.Sigmoid()
+            #nn.ReLU(inplace=True),
+            #nn.AdaptiveAvgPool2d(1)
+            #nn.Dropout(drop, inplace=True)
+            #nn.Conv2d(mid_features*2, mid_features*2, 3, padding=1),
+            #nn.ReLU(inplace=True)
+        )
+
 
         self.drop = nn.Dropout(drop)
         self.relu = nn.ReLU(inplace=True)
+        self.c_att = Channel_Attention_Layer(mid_features)
+        self.s_att = Spatial_Attention_Layer(mid_features)
+        self.pooling = nn.AdaptiveAvgPool2d(1)
 
     def forward(self, v, q):
-        v = self.v_conv(self.drop(v))
+        #print(v.size(), q.size())
+        v1 = self.v_conv(self.drop(v))
         q = self.q_lin(self.drop(q))
-        q = tile_2d_over_nd(q, v)
-        x = self.relu(v + q)
-        x = self.x_conv(self.drop(x))
+        q = tile_2d_over_nd(q, v1)
+        x = self.relu(v1+q)#torch.cat([v1, q], 1)
+        
+        #x = self.fusion(self.drop(x))
+        #x = x.view(x.size(0), -1)
+        y1 = self.s_att(self.drop(x))
+        #y2 = self.c_att(self.drop(x))
+        x = (y1 + 0)*v
+        x = x.sum(dim=3).sum(dim=2)
+        #x = self.pooling(x)
+        x = x.view(x.size(0), -1)
+        #x = self.attention(x)
         return x
 
 

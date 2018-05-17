@@ -13,21 +13,29 @@ import config
 import utils
 
 
-def get_loader(train=False, val=False, test=False):
+def get_loader(train=False, val=False, test=False, batch_size=128):
     """ Returns a data loader for the desired split """
     assert train + val + test == 1, 'need to set exactly one of {train, val, test} to True'
-    split = VQA(
-        utils.path_for(train=train, val=val, test=test, question=True),
-        utils.path_for(train=train, val=val, test=test, answer=True),
-        config.preprocessed_path,
-        answerable_only=train,
-    )
+    if test: 
+        # Test data doesnt have answers
+        split = TestVQA(
+            utils.path_for(train=train, val=val, test=test, question=True),
+            config.preprocessed_path,
+            answerable_only=False,
+        )
+    else:
+        split = VQA(
+            utils.path_for(train=train, val=val, test=test, question=True),
+            utils.path_for(train=train, val=val, test=test, answer=True),
+            config.preprocessed_path,
+            answerable_only=train,
+        )
     loader = torch.utils.data.DataLoader(
         split,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=train,  # only shuffle the data in training
         pin_memory=True,
-        num_workers=config.data_workers,
+        num_workers=8,
         collate_fn=collate_fn,
     )
     return loader
@@ -57,10 +65,10 @@ class VQA(data.Dataset):
         self.answer_to_index = self.vocab['answer']
 
         # q and a
-        self.questions = list(prepare_questions(questions_json))
-        self.answers = list(prepare_answers(answers_json))
-        self.questions = [self._encode_question(q) for q in self.questions]
-        self.answers = [self._encode_answers(a) for a in self.answers]
+        self.questions_str = list(prepare_questions(questions_json))
+        self.answers_str = list(prepare_answers(answers_json))
+        self.questions = [self._encode_question(q) for q in self.questions_str]
+        self.answers = [self._encode_answers(a) for a in self.answers_str]
 
         # v
         self.image_features_path = image_features_path
@@ -75,7 +83,7 @@ class VQA(data.Dataset):
     @property
     def max_question_length(self):
         if not hasattr(self, '_max_length'):
-            self._max_length = max(map(len, self.questions))
+            self._max_length = max(map(len, self.questions_str))
         return self._max_length
 
     @property
@@ -125,6 +133,9 @@ class VQA(data.Dataset):
             index = self.answer_to_index.get(answer)
             if index is not None:
                 answer_vec[index] += 1
+        #_, one_hot_idx = answer_vec.max(0)
+        #answer_vec = torch.zeros(len(self.answer_to_index))
+        #answer_vec[one_hot_idx] = 10
         return answer_vec
 
     def _load_image(self, image_id):
@@ -158,6 +169,48 @@ class VQA(data.Dataset):
             return len(self.answerable)
         else:
             return len(self.questions)
+
+class TestVQA(VQA):
+    """ VQA dataset, open-ended """
+    def __init__(self, questions_path, image_features_path, answerable_only=False):
+        #super(VQA, self).__init__()
+        with open(questions_path, 'r') as fd:
+            questions_json = json.load(fd)
+        with open(config.vocabulary_path, 'r') as fd:
+            vocab_json = json.load(fd)
+        #self._check_integrity(questions_json, answers_json)
+
+        # vocab
+        self.vocab = vocab_json
+        self.token_to_index = self.vocab['question']
+        self.answer_to_index = self.vocab['answer']
+
+        # q
+        self.questions_str = list(prepare_questions(questions_json))
+        self.questions = [self._encode_question(q) for q in self.questions_str]
+        self.question_ids = [q['question_id'] for q in questions_json['questions']]
+
+        # v
+        self.image_features_path = image_features_path
+        self.coco_id_to_index = self._create_coco_id_to_index()
+        self.coco_ids = [q['image_id'] for q in questions_json['questions']]
+
+        self.answerable_only = answerable_only
+    
+    def _index_to_answer(self, idx):
+        ans_idx = self.answer_to_index.values().index(idx)
+        return self.answer_to_index.keys()[ans_idx]
+
+    def __getitem__(self, item):
+        q, q_length = self.questions[item]
+        q_id = self.question_ids[item]
+        image_id = self.coco_ids[item]
+        v = self._load_image(image_id)
+        
+        # since batches are re-ordered for PackedSequence's, the original question order is lost
+        # we return `item` so that the order of (v, q)  can be restored if desired
+        # without shuffling in the dataloader, these will be in the order that they appear in the q json.
+        return v, q, q_id, image_id, item, q_length
 
 
 # this is used for normalizing questions

@@ -15,8 +15,7 @@ from tensorboardX import SummaryWriter
 import progressbar
 import config
 import data
-from models.san import *
-from model import *
+from models import *
 import utils
 
 args={}
@@ -36,11 +35,11 @@ def main():
 
     # Dataset
     print('Creating dataset...')
-    train_loader = data.get_loader(train=True)
-    val_loader = data.get_loader(val=True)
+    train_loader = data.get_loader(train=True, batch_size=args.batch_size)
+    val_loader = data.get_loader(val=True, batch_size=args.batch_size)
 
     # Model
-    checkpoint = os.path.join(args.checkpoint, args.model)
+    checkpoint = os.path.join(args.checkpoint)
     if not os.path.exists(checkpoint):
         os.makedirs(checkpoint)
     model_path = os.path.join(checkpoint, 'best_model.pt')
@@ -59,7 +58,7 @@ def main():
 
     # optim
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, args.schedule, gamma=0.2)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, args.schedule, gamma=0.5)
     log_softmax = nn.LogSoftmax().cuda()
     
     # Log 
@@ -70,7 +69,9 @@ def main():
     for epoch in range(args.num_epochs):
         # Train
         scheduler.step()
-        print('Start training epoch {}. Learning rate {}'.format(epoch, optimizer.param_groups[0]['lr']))
+        learning_rate = optimizer.param_groups[0]['lr']
+        print('Start training epoch {}. Learning rate {}'.format(epoch, learning_rate))
+        writer.add_scalar('Learning rate', learning_rate, epoch)
         model.train()
         num_batches = len(train_loader.dataset)//args.batch_size
         bar = progressbar.ProgressBar(max_value=num_batches)
