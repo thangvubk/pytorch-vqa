@@ -25,7 +25,7 @@ parser.add_argument('--weight_decay', type=float, default=0,
 parser.add_argument('--schedule', type=int, nargs='+', default=[20, 30, 40],
                      help='Decrease learning rate at these epochs.')
 parser.add_argument('--checkpoint', type=str, default='checkpoint')
-parser.add_argument('--model', type=str, default='resnet')
+parser.add_argument('--model', type=str, default='isan')
 parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--num-epochs', type=int, default=50)
 parser.add_argument('--learning-rate', type=float, default=0.001)
@@ -44,7 +44,8 @@ def main():
         os.makedirs(checkpoint)
     model_path = os.path.join(checkpoint, 'best_model.pt')
     print('Loading model...')
-    model = SAN(train_loader.dataset.num_tokens)
+    print(args.model)
+    model = get_vqa_model(args.model, train_loader.dataset.num_tokens)
     #model = resnet50_CA()
     #print(model)
     # Test only

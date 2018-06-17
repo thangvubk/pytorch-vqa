@@ -4,17 +4,11 @@ from torch.autograd import Variable
 import torch.nn.init as init 
 from torch.nn.utils.rnn import pack_padded_sequence
 class SAN(nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size, drop=0.6):
         super(SAN, self).__init__()
-        self.image_module = ImageEmbedding()
-        self.question_module = QuestionEmbedding(vocab_size)
-        self.attention_module = Attention()
-        self.question_module1 = TextProcessor(
-            embedding_tokens=vocab_size,
-            embedding_features=300,
-            lstm_features=1024,
-            drop=0.5,
-        )
+        self.image_module = ImageEmbedding(drop=drop)
+        self.question_module = QuestionEmbedding(vocab_size, dropout=drop)
+        self.attention_module = Attention(drop_ratio=drop)
     
     def forward(self, image, ques, ques_len):
         embed_image = self.image_module(image)
@@ -22,7 +16,7 @@ class SAN(nn.Module):
         return self.attention_module(embed_quest, embed_image)
 
 class Attention(nn.Module): # Extend PyTorch's Module class
-    def __init__(self, input_size=1024, att_size=512, img_seq_size=196, output_size=1000, drop_ratio=0.5):
+    def __init__(self, input_size=1024, att_size=512, img_seq_size=196, output_size=1000, drop_ratio=0.8):
         super(Attention, self).__init__() # Must call super __init__()
         self.input_size = input_size
         self.att_size = att_size
@@ -85,7 +79,7 @@ class Attention(nn.Module): # Extend PyTorch's Module class
         return score
 
 class ImageEmbedding(nn.Module):
-    def __init__(self, hidden_size=1024, feature_type='VGG'):
+    def __init__(self, hidden_size=1024, feature_type='VGG', drop=0.8):
         super(ImageEmbedding, self).__init__() # Must call super __init__()
 
         if feature_type == 'VGG':
@@ -99,9 +93,10 @@ class ImageEmbedding(nn.Module):
         self.hidden_size = hidden_size
         self.linear = nn.Linear(self.img_features, self.hidden_size)
         self.tanh = nn.Tanh()
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(drop)
 
     def forward(self, input):
+        input = input / (input.norm(p=2, dim=1, keepdim=True).expand_as(input) + 1e-8)
         # input: [batch_size, 14, 14, 512]
         input = input.permute(0, 2, 3, 1).contiguous()
 
@@ -111,7 +106,7 @@ class ImageEmbedding(nn.Module):
         #return self.tanh(intermed)
 
 class QuestionEmbedding(nn.Module):
-    def __init__(self, vocab_size, emb_size=500, hidden_size=1024, rnn_size=1024, num_layers=2, dropout=0.5, seq_length=26, use_gpu=True):
+    def __init__(self, vocab_size, emb_size=500, hidden_size=1024, rnn_size=1024, num_layers=2, dropout=0.8, seq_length=26, use_gpu=True):
         super(QuestionEmbedding, self).__init__() # Must call super __init__()
 
 	self.use_gpu = use_gpu

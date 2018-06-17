@@ -117,7 +117,7 @@ def main():
         os.makedirs(checkpoint)
     model_path = os.path.join(checkpoint, 'best_model.pt')
     print('Loading model...')
-    model = SAA(train_loader.dataset.num_tokens)
+    model = SAN(train_loader.dataset.num_tokens)
     
     model.load_state_dict(torch.load(model_path))
 

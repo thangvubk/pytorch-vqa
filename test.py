@@ -21,7 +21,7 @@ import utils
 args={}
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint', type=str, default='checkpoint')
-parser.add_argument('--model', type=str, default='resnet')
+parser.add_argument('--model', type=str, default='isan')
 parser.add_argument('--batch-size', type=int, default=128)
 args = parser.parse_args()
 def main():
@@ -33,11 +33,9 @@ def main():
 
     # Model
     checkpoint = os.path.join(args.checkpoint)
-    if not os.path.exists(checkpoint):
-        os.makedirs(checkpoint)
     model_path = os.path.join(checkpoint, 'best_model.pt')
     print('Loading model...')
-    model = SAA(train_loader.dataset.num_tokens)
+    model = get_vqa_model(args.model, train_loader.dataset.num_tokens)
     
     model.load_state_dict(torch.load(model_path))
 
@@ -64,11 +62,10 @@ def main():
         for j in range(preds.size(0)):
             ans_idx = preds.cpu()[j]
             answer = test_loader.dataset._index_to_answer(ans_idx)
-            result.append({u'answer': answer, u'question_id': quest_id[j]})
-        #acc += utils.batch_accuracy(outputs.data, labels.data).sum()
+            result.append({u'answer': answer, u'question_id': int(quest_id[j])})
         bar.update(i, force=True)
     result = list(result)
-    json.dump(result, open('result.json','w'))
+    json.dump(result, open('results/result.json','w'))
 
 
 if __name__ == '__main__':
